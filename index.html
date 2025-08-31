@@ -180,19 +180,35 @@
       return resp;
     }
 
-    try {
-      await postOnce(payload);
-      statusEl.innerHTML = "<span class='ok'>Submitted.</span>";
-      const q = JSON.parse(localStorage.getItem("pendingSubmissions") || "[]"); q.pop();
-      localStorage.setItem("pendingSubmissions", JSON.stringify(q));
-      form.reset();
-      locPreview.textContent = coords ? ("Saved GPS: " + coords.lat.toFixed(5) + ", " + coords.lng.toFixed(5)) : "No GPS";
-    } catch {
-      statusEl.innerHTML = "<span class='warn'>Offline or webhook failed. Will retry when online.</span>";
-      if ('serviceWorker' in navigator && navigator.serviceWorker.ready) {
-        try { (await navigator.serviceWorker.ready).sync.register('sync-submissions'); } catch {}
-      }
-    }
+    async function postOnce(body) {
+  // Try JSON first
+  try {
+    const r = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r;
+  } catch (err) {
+    // Retry with FormData (no custom headers → no preflight)
+    const fd = new FormData();
+    fd.append("who", body.who || "");
+    fd.append("contact", body.contact || "");
+    fd.append("notify", body.notify || "");
+    fd.append("summary", body.summary || "");
+    fd.append("site", body.site || "");
+    fd.append("device", body.device || navigator.userAgent || "");
+    fd.append("submitted_at", body.submitted_at || new Date().toISOString());
+    if (body.coords) fd.append("coords", JSON.stringify(body.coords));
+    if (body.maps_link) fd.append("maps_link", body.maps_link);
+    if (body.photo_b64) fd.append("photo_b64", body.photo_b64);
+
+    const r2 = await fetch(webhookUrl, { method: "POST", body: fd });
+    if (!r2.ok) throw new Error("HTTP " + r2.status);
+    return r2;
+  }
+}
   });
 })();
 </script>
