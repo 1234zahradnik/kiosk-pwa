@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kiosk → n8n</title>
+  <meta name="theme-color" content="#0ea5e9" />
+  <link rel="manifest" href="manifest.webmanifest">
+  <style>
+    :root { --bg:#0b1220; --card:#111827; --ink:#e5e7eb; --muted:#9ca3af; --accent:#0ea5e9; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--ink); }
+    header { padding: 16px 20px; background: linear-gradient(90deg, #0ea5e9 0%, #22d3ee 100%); color:#001018; font-weight: 700; letter-spacing:.3px; }
+    main { max-width: 800px; margin: 0 auto; padding: 20px; }
+    .card { background: var(--card); border: 1px solid #1f2937; border-radius: 16px; padding: 16px; box-shadow: 0 8px 20px rgba(0,0,0,.35); }
+    label { display:block; margin: 12px 0 6px; color: var(--muted); font-size: 14px; }
+    input, select, textarea { width:100%; padding:12px 14px; border-radius:12px; border:1px solid #374151; background:#0a0f1a; color:var(--ink); outline:none; }
+    textarea { min-height: 100px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 640px) { .row2 { grid-template-columns: 1fr 1fr; } }
+    .btn { width:100%; background: var(--accent); color:#041318; border: none; margin-top: 16px; padding: 14px 16px; font-weight: 800; border-radius: 14px; }
+    .note { font-size: 12px; color: var(--muted); margin-top:8px; }
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #1f2937; background:#0a0f1a; font-size:12px; }
+    .ok { color:#10b981; }
+    .warn { color:#f59e0b; }
+    .err { color:#ef4444; }
+    .status { margin-top: 10px; font-size: 14px; }
+    footer { text-align:center; color:var(--muted); font-size:12px; padding:20px 10px; }
+    .grid-2 { display:grid; gap: 10px; grid-template-columns:1fr 1fr; }
+    .small { font-size: 12px; }
+    .center { text-align:center; }
+  </style>
+</head>
+<body>
+  <header>Kiosk → n8n</header>
+  <main>
+    <div class="card">
+      <p class="small">This form captures GPS (with user permission) and posts JSON to your n8n webhook.</p>
+
+      <div class="grid-2 small">
+        <div>GPS: <span id="gpsStatus" class="pill">requesting…</span></div>
+        <div>Installable: <span id="installStatus" class="pill">checking…</span></div>
+      </div>
+
+      <form id="kioskForm">
+        <div class="row row2">
+          <div>
+            <label for="who">Your name</label>
+            <input id="who" name="who" autocomplete="name" placeholder="e.g., Miles" required />
+          </div>
+          <div>
+            <label for="contact">Contact (optional)</label>
+            <input id="contact" name="contact" autocomplete="tel" placeholder="phone/email" />
+          </div>
+        </div>
+
+        <label for="summary">Summary / What happened?</label>
+        <textarea id="summary" name="summary" placeholder="Short description…" required></textarea>
+
+        <label for="photo">Photo (optional)</label>
+        <input id="photo" name="photo" type="file" accept="image/*" capture="environment" />
+
+        <div class="row row2">
+          <div>
+            <label for="site">Site / Line (optional)</label>
+            <input id="site" name="site" placeholder="e.g., Line 2 / Press 4" />
+          </div>
+          <div>
+            <label>Location (auto)</label>
+            <div class="small" id="locationPreview">Waiting for GPS…</div>
+          </div>
+        </div>
+
+        <button class="btn" type="submit">Submit to n8n</button>
+        <div id="status" class="status"></div>
+      </form>
+    </div>
+
+    <footer>
+      <div>Tip: add to Home Screen for kiosk-like behavior. Works offline; submits when back online.</div>
+    </footer>
+  </main>
+
+<script>
+(function() {
+  const $ = sel => document.querySelector(sel);
+  const gpsEl = $("#gpsStatus");
+  const locPreview = $("#locationPreview");
+  const statusEl = $("#status");
+  const webhookUrl = "https://YOUR-N8N-URL/webhook/kiosk-intake"; // REPLACE with your real n8n webhook URL
+
+  let coords = null;
+
+  // Install/PWA prompt state
+  let deferredPrompt = null;
+  const installEl = $("#installStatus");
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installEl.textContent = "ready to install";
+  });
+  window.addEventListener('appinstalled', () => {
+    installEl.textContent = "installed";
+  });
+  if (window.matchMedia('(display-mode: standalone)').matches) {
+    installEl.textContent = "installed";
+  } else {
+    installEl.textContent = "available";
+  }
+
+  // Register service worker for offline caching
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+  }
+
+  // Request GPS (high accuracy if available)
+  function onGPSOk(position) {
+    coords = {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracy_m: position.coords.accuracy ?? null,
+      ts: new Date().toISOString()
+    };
+    const mapLink = `https://maps.google.com/?q=${coords.lat},${coords.lng}`;
+    gpsEl.textContent = "ok";
+    gpsEl.classList.add("ok");
+    locPreview.innerHTML = `<a href="${mapLink}" target="_blank" rel="noopener">Open in Google Maps</a><br/><span class="small">± ${Math.round(coords.accuracy_m || 0)} m</span>`;
+  }
+  function onGPSErr(err) {
+    gpsEl.textContent = "disabled";
+    gpsEl.classList.add("warn");
+    locPreview.textContent = "Location permission denied or unavailable.";
+  }
+  try {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(onGPSOk, onGPSErr, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+    } else {
+      gpsEl.textContent = "no GPS";
+      gpsEl.classList.add("err");
+      locPreview.textContent = "Geolocation not supported.";
+    }
+  } catch (e) {
+    gpsEl.textContent = "error";
+    gpsEl.classList.add("err");
+  }
+
+  // Photo to base64 (small helper)
+  function fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Submit handler
+  $("#kioskForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    statusEl.textContent = "Submitting…";
+
+    const form = e.target;
+    const who = form.who.value.trim();
+    const contact = form.contact.value.trim();
+    const summary = form.summary.value.trim();
+    const site = form.site.value.trim();
+    const photo = form.photo.files[0];
+
+    let photo_b64 = null;
+    if (photo) {
+      try { photo_b64 = await fileToDataURL(photo); }
+      catch (err) { console.error(err); }
+    }
+
+    const payload = {
+      who, contact, summary, site,
+      device: navigator.userAgent,
+      submitted_at: new Date().toISOString(),
+      coords, 
+      maps_link: coords ? `https://maps.google.com/?q=${coords.lat},${coords.lng}` : null,
+      photo_b64
+    };
+
+    // Persist to local storage for offline retries
+    try {
+      const queue = JSON.parse(localStorage.getItem("pendingSubmissions") || "[]");
+      queue.push(payload);
+      localStorage.setItem("pendingSubmissions", JSON.stringify(queue));
+    } catch (e) { /* ignore */ }
+
+    async function postOnce(body) {
+      const resp = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return resp;
+    }
+
+    // Try immediate post; if fails, leave in queue for service worker to retry
+    try {
+      await postOnce(payload);
+      statusEl.innerHTML = "<span class='ok'>Submitted.</span>";
+      // Remove newest (just submitted) from queue
+      const queue = JSON.parse(localStorage.getItem("pendingSubmissions") || "[]");
+      queue.pop();
+      localStorage.setItem("pendingSubmissions", JSON.stringify(queue));
+      form.reset();
+      locPreview.textContent = coords ? ("Saved GPS: " + coords.lat.toFixed(5) + ", " + coords.lng.toFixed(5)) : "No GPS";
+    } catch (err) {
+      statusEl.innerHTML = "<span class='warn'>Offline or webhook failed. Will retry when online.</span>";
+      // Wake the SW to sync later
+      if ('serviceWorker' in navigator && navigator.serviceWorker.ready) {
+        try { (await navigator.serviceWorker.ready).sync.register('sync-submissions'); } catch (e) { /* ignore */ }
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
