@@ -9,33 +9,28 @@
   <style>
     :root { --bg:#0b1220; --card:#111827; --ink:#e5e7eb; --muted:#9ca3af; --accent:#0ea5e9; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--ink); }
-    header { padding: 16px 20px; background: linear-gradient(90deg, #0ea5e9 0%, #22d3ee 100%); color:#001018; font-weight: 700; letter-spacing:.3px; }
-    main { max-width: 800px; margin: 0 auto; padding: 20px; }
-    .card { background: var(--card); border: 1px solid #1f2937; border-radius: 16px; padding: 16px; box-shadow: 0 8px 20px rgba(0,0,0,.35); }
-    label { display:block; margin: 12px 0 6px; color: var(--muted); font-size: 14px; }
+    body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+    header { padding:16px 20px; background:linear-gradient(90deg,#0ea5e9 0%,#22d3ee 100%); color:#001018; font-weight:700; letter-spacing:.3px; }
+    main { max-width:800px; margin:0 auto; padding:20px; }
+    .card { background:var(--card); border:1px solid #1f2937; border-radius:16px; padding:16px; box-shadow:0 8px 20px rgba(0,0,0,.35); }
+    label { display:block; margin:12px 0 6px; color:var(--muted); font-size:14px; }
     input, select, textarea { width:100%; padding:12px 14px; border-radius:12px; border:1px solid #374151; background:#0a0f1a; color:var(--ink); outline:none; }
-    textarea { min-height: 100px; resize: vertical; }
-    .row { display: grid; grid-template-columns: 1fr; gap: 12px; }
-    @media (min-width: 640px) { .row2 { grid-template-columns: 1fr 1fr; } }
-    .btn { width:100%; background: var(--accent); color:#041318; border: none; margin-top: 16px; padding: 14px 16px; font-weight: 800; border-radius: 14px; }
-    .note { font-size: 12px; color: var(--muted); margin-top:8px; }
+    textarea { min-height:100px; resize:vertical; }
+    .row { display:grid; grid-template-columns:1fr; gap:12px; }
+    @media (min-width:640px){ .row2 { grid-template-columns:1fr 1fr; } }
+    .btn { width:100%; background:var(--accent); color:#041318; border:none; margin-top:16px; padding:14px 16px; font-weight:800; border-radius:14px; }
     .pill { display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #1f2937; background:#0a0f1a; font-size:12px; }
-    .ok { color:#10b981; }
-    .warn { color:#f59e0b; }
-    .err { color:#ef4444; }
-    .status { margin-top: 10px; font-size: 14px; }
-    footer { text-align:center; color:var(--muted); font-size:12px; padding:20px 10px; }
-    .grid-2 { display:grid; gap: 10px; grid-template-columns:1fr 1fr; }
-    .small { font-size: 12px; }
-    .center { text-align:center; }
+    .ok { color:#10b981; } .warn { color:#f59e0b; } .err { color:#ef4444; }
+    .status { margin-top:10px; font-size:14px; }
+    .grid-2 { display:grid; gap:10px; grid-template-columns:1fr 1fr; }
+    .small { font-size:12px; } footer { text-align:center; color:var(--muted); font-size:12px; padding:20px 10px; }
   </style>
 </head>
 <body>
   <header>Kiosk → n8n</header>
   <main>
     <div class="card">
-      <p class="small">This form captures GPS (with user permission) and posts JSON to your n8n webhook.</p>
+      <p class="small">This form captures GPS (with permission) and posts JSON to your n8n webhook.</p>
 
       <div class="grid-2 small">
         <div>GPS: <span id="gpsStatus" class="pill">requesting…</span></div>
@@ -53,6 +48,10 @@
             <input id="contact" name="contact" autocomplete="tel" placeholder="phone/email" />
           </div>
         </div>
+
+        <!-- NEW: address to notify -->
+        <label for="notify">Send to (email)</label>
+        <input id="notify" name="notify" placeholder="e.g., wife@example.com" />
 
         <label for="summary">Summary / What happened?</label>
         <textarea id="summary" name="summary" placeholder="Short description…" required></textarea>
@@ -76,45 +75,34 @@
       </form>
     </div>
 
-    <footer>
-      <div>Tip: add to Home Screen for kiosk-like behavior. Works offline; submits when back online.</div>
-    </footer>
+    <footer><div>Add to Home Screen for kiosk mode. Works offline; retries when back online.</div></footer>
   </main>
 
 <script>
-(function() {
-  const $ = sel => document.querySelector(sel);
+(function(){
+  const $ = s => document.querySelector(s);
   const gpsEl = $("#gpsStatus");
   const locPreview = $("#locationPreview");
   const statusEl = $("#status");
-  const webhookUrl = "https://n8n.srv966244.hstgr.cloud/webhook/kiosk-intake-separate"; // REPLACE with your real n8n webhook URL
+
+  // ✅ Your production webhook URL
+  const webhookUrl = "https://n8n.srv966244.hstgr.cloud/webhook/kiosk-intake-separate";
 
   let coords = null;
 
-  // Install/PWA prompt state
-  let deferredPrompt = null;
+  // PWA install state
   const installEl = $("#installStatus");
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    installEl.textContent = "ready to install";
-  });
-  window.addEventListener('appinstalled', () => {
-    installEl.textContent = "installed";
-  });
-  if (window.matchMedia('(display-mode: standalone)').matches) {
-    installEl.textContent = "installed";
-  } else {
-    installEl.textContent = "available";
-  }
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEl.textContent = "ready to install"; });
+  window.addEventListener('appinstalled', () => { installEl.textContent = "installed"; });
+  installEl.textContent = window.matchMedia('(display-mode: standalone)').matches ? "installed" : "available";
 
-  // Register service worker for offline caching
+  // Service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./service-worker.js').catch(console.error);
   }
 
-  // Request GPS (high accuracy if available)
-  function onGPSOk(position) {
+  // GPS
+  function onGPSOk(position){
     coords = {
       lat: position.coords.latitude,
       lng: position.coords.longitude,
@@ -122,39 +110,33 @@
       ts: new Date().toISOString()
     };
     const mapLink = `https://maps.google.com/?q=${coords.lat},${coords.lng}`;
-    gpsEl.textContent = "ok";
-    gpsEl.classList.add("ok");
+    gpsEl.textContent = "ok"; gpsEl.classList.add("ok");
     locPreview.innerHTML = `<a href="${mapLink}" target="_blank" rel="noopener">Open in Google Maps</a><br/><span class="small">± ${Math.round(coords.accuracy_m || 0)} m</span>`;
   }
-  function onGPSErr(err) {
-    gpsEl.textContent = "disabled";
-    gpsEl.classList.add("warn");
+  function onGPSErr(){
+    gpsEl.textContent = "disabled"; gpsEl.classList.add("warn");
     locPreview.textContent = "Location permission denied or unavailable.";
   }
   try {
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(onGPSOk, onGPSErr, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      navigator.geolocation.getCurrentPosition(onGPSOk, onGPSErr, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
     } else {
-      gpsEl.textContent = "no GPS";
-      gpsEl.classList.add("err");
+      gpsEl.textContent = "no GPS"; gpsEl.classList.add("err");
       locPreview.textContent = "Geolocation not supported.";
     }
-  } catch (e) {
-    gpsEl.textContent = "error";
-    gpsEl.classList.add("err");
-  }
+  } catch { gpsEl.textContent = "error"; gpsEl.classList.add("err"); }
 
-  // Photo to base64 (small helper)
-  function fileToDataURL(file) {
+  // File → base64
+  function fileToDataURL(file){
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
     });
   }
 
-  // Submit handler
+  // Submit
   $("#kioskForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     statusEl.textContent = "Submitting…";
@@ -162,33 +144,33 @@
     const form = e.target;
     const who = form.who.value.trim();
     const contact = form.contact.value.trim();
+    const notify = form.notify.value.trim();            // <-- NEW
     const summary = form.summary.value.trim();
     const site = form.site.value.trim();
     const photo = form.photo.files[0];
 
     let photo_b64 = null;
     if (photo) {
-      try { photo_b64 = await fileToDataURL(photo); }
-      catch (err) { console.error(err); }
+      try { photo_b64 = await fileToDataURL(photo); } catch {}
     }
 
     const payload = {
-      who, contact, summary, site,
+      who, contact, summary, site, notify,                 // <-- NEW in payload
       device: navigator.userAgent,
       submitted_at: new Date().toISOString(),
-      coords, 
+      coords,
       maps_link: coords ? `https://maps.google.com/?q=${coords.lat},${coords.lng}` : null,
       photo_b64
     };
 
-    // Persist to local storage for offline retries
+    // Queue locally for offline retry
     try {
-      const queue = JSON.parse(localStorage.getItem("pendingSubmissions") || "[]");
-      queue.push(payload);
-      localStorage.setItem("pendingSubmissions", JSON.stringify(queue));
-    } catch (e) { /* ignore */ }
+      const q = JSON.parse(localStorage.getItem("pendingSubmissions") || "[]");
+      q.push(payload);
+      localStorage.setItem("pendingSubmissions", JSON.stringify(q));
+    } catch {}
 
-    async function postOnce(body) {
+    async function postOnce(body){
       const resp = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,21 +180,17 @@
       return resp;
     }
 
-    // Try immediate post; if fails, leave in queue for service worker to retry
     try {
       await postOnce(payload);
       statusEl.innerHTML = "<span class='ok'>Submitted.</span>";
-      // Remove newest (just submitted) from queue
-      const queue = JSON.parse(localStorage.getItem("pendingSubmissions") || "[]");
-      queue.pop();
-      localStorage.setItem("pendingSubmissions", JSON.stringify(queue));
+      const q = JSON.parse(localStorage.getItem("pendingSubmissions") || "[]"); q.pop();
+      localStorage.setItem("pendingSubmissions", JSON.stringify(q));
       form.reset();
       locPreview.textContent = coords ? ("Saved GPS: " + coords.lat.toFixed(5) + ", " + coords.lng.toFixed(5)) : "No GPS";
-    } catch (err) {
+    } catch {
       statusEl.innerHTML = "<span class='warn'>Offline or webhook failed. Will retry when online.</span>";
-      // Wake the SW to sync later
       if ('serviceWorker' in navigator && navigator.serviceWorker.ready) {
-        try { (await navigator.serviceWorker.ready).sync.register('sync-submissions'); } catch (e) { /* ignore */ }
+        try { (await navigator.serviceWorker.ready).sync.register('sync-submissions'); } catch {}
       }
     }
   });
